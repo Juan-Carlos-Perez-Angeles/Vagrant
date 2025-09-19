@@ -27,36 +27,23 @@ Vagrant.configure("2") do |config|
     sudo sed -i 's/^#\?KbdInteractiveAuthentication.*/KbdInteractiveAuthentication no/' /etc/ssh/sshd_config
     sudo sshd -t && sudo systemctl restart ssh || sudo systemctl start ssh
 
-    IP_ADDR="$(ip -o -4 addr show scope global | awk '{print $4}' | cut -d/ -f1 | head -n1 || true)"
-    HOSTNAME="$(hostname -s)"
-    echo "<h1>Hola desde ${HOSTNAME} (${IP_ADDR})</h1>" | sudo tee /var/www/html/index.html >/dev/null
-
-    if [ -f /etc/ssl/openssl.cnf ] && [ ! -f /etc/ssl/openssl.cnf.orig ]; then
-      sudo cp /etc/ssl/openssl.cnf /etc/ssl/openssl.cnf.orig
+    if [ -f /vagrant/index.html ]; then
+      sudo cp /vagrant/index.html /var/www/html/index.html
+      echo "index.html personalizado aplicado en $(hostname -s)"
+    else
+      IP_ADDR="$(ip -o -4 addr show scope global | awk '{print $4}' | cut -d/ -f1 | head -n1 || true)"
+      HOSTNAME="$(hostname -s)"
+      echo "<h1>Hola desde ${HOSTNAME} (${IP_ADDR})</h1>" | sudo tee /var/www/html/index.html >/dev/null
+      echo "index.html generado automáticamente"
     fi
-    sudo tee /etc/ssl/openssl.cnf >/dev/null <<EOF
-[ req ]
-default_bits       = 2048
-default_md         = sha256
-distinguished_name = req_distinguished_name
-req_extensions     = v3_req
-prompt             = no
-[ req_distinguished_name ]
-C  = MX
-ST = CDMX
-L  = Mexico City
-O  = DemoOrg
-OU = IT
-CN = ${HOSTNAME}
-[ v3_req ]
-keyUsage         = keyEncipherment, dataEncipherment, digitalSignature
-extendedKeyUsage = serverAuth, clientAuth
-basicConstraints = CA:FALSE
-subjectAltName   = @alt_names
-[ alt_names ]
-DNS.1 = ${HOSTNAME}
-IP.1  = ${IP_ADDR}
-EOF
+
+    if [ -f /vagrant/openssl.cnf ]; then
+      sudo cp /etc/ssl/openssl.cnf /etc/ssl/openssl.cnf.bak || true
+      sudo cp /vagrant/openssl.cnf /etc/ssl/openssl.cnf
+      echo "openssl.cnf personalizado aplicado en $(hostname -s)"
+    else
+      echo "Advertencia: /vagrant/openssl.cnf no encontrado, usando el predeterminado"
+    fi
   SHELL
 
   linux_enable_password = <<-'SHELL'
