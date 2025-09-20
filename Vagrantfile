@@ -104,6 +104,26 @@ EOF
       vb.customize ["modifyvm", :id, "--ioapic", "on"]
       vb.customize ["modifyvm", :id, "--nictype2", "82540EM"]
     end
+    win.vm.provision "shell",
+    name: "network-private-and-icmp",
+    privileged: true,
+    powershell_elevated_interactive: true,
+    inline: <<-'POWERSHELL'
+  $ErrorActionPreference = "Stop"
+  try {
+  $ip = Get-NetIPAddress -IPAddress 192.168.56.20 -ErrorAction Stop
+  if ((Get-NetConnectionProfile -InterfaceIndex $ip.InterfaceIndex).NetworkCategory -ne 'Private') {
+    Set-NetConnectionProfile -InterfaceIndex $ip.InterfaceIndex -NetworkCategory Private
+   }
+  } catch {
+  Get-NetAdapter | Where-Object {$_.InterfaceDescription -like "*VirtualBox*"} | ForEach-Object {
+    Set-NetConnectionProfile -InterfaceAlias $_.Name -NetworkCategory Private -ErrorAction SilentlyContinue
+   }
+  }
+  Get-NetFirewallRule -Direction Inbound | Where-Object { $_.DisplayName -like "*Echo Request*" } | Enable-NetFirewallRule
+  New-NetFirewallRule -DisplayName "Allow ICMPv4 Echo In (Vagrant)" -Protocol ICMPv4 -IcmpType 8 -Direction Inbound -Action Allow -Profile Any -ErrorAction SilentlyContinue
+    POWERSHELL
+
 
     win.vm.provision "shell",
     name: "tools-putty-puttygen-chrome",
