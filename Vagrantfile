@@ -106,103 +106,70 @@ EOF
     end
 
     win.vm.provision "shell",
-      name: "network-private-and-icmp",
-      privileged: true,
-      powershell_elevated_interactive: true,
-      inline: <<-'POWERSHELL'
-$ErrorActionPreference = "Stop"
-
-try {
-  $ip = Get-NetIPAddress -IPAddress 192.168.56.20 -ErrorAction Stop
-  if ((Get-NetConnectionProfile -InterfaceIndex $ip.InterfaceIndex).NetworkCategory -ne 'Private') {
-    Set-NetConnectionProfile -InterfaceIndex $ip.InterfaceIndex -NetworkCategory Private
-  }
-} catch {
-  Get-NetAdapter | Where-Object {$_.InterfaceDescription -like "*VirtualBox*"} | ForEach-Object {
-    Set-NetConnectionProfile -InterfaceAlias $_.Name -NetworkCategory Private -ErrorAction SilentlyContinue
-  }
-}
-
-Get-NetFirewallRule -Direction Inbound | Where-Object { $_.DisplayName -like "*Echo Request*" } | Enable-NetFirewallRule
-New-NetFirewallRule -DisplayName "Allow ICMPv4 Echo In (Vagrant)" -Protocol ICMPv4 -IcmpType 8 -Direction Inbound -Action Allow -Profile Any -ErrorAction SilentlyContinue
-      POWERSHELL
-
-  win.vm.provision "shell",
-    name: "tools-putty-chrome",
+    name: "tools-putty-puttygen-chrome",
     privileged: true,
     powershell_elevated_interactive: true,
     inline: <<-'POWERSHELL'
   $ErrorActionPreference = "Stop"
 
-  try { Set-Service -Name sshd -StartupType Automatic; Start-Service sshd } catch { }
+  try { Set-Service -Name sshd -StartupType Automatic -ErrorAction Stop; Start-Service sshd -ErrorAction SilentlyContinue } catch {}
 
   if (-not (Get-Command choco.exe -ErrorAction SilentlyContinue)) {
     Set-ExecutionPolicy Bypass -Scope Process -Force
     [Net.ServicePointManager]::SecurityProtocol = [Net.SecurityProtocolType]::Tls12
     Invoke-Expression ((New-Object Net.WebClient).DownloadString('https://community.chocolatey.org/install.ps1'))
   }
+  $chocoBin = Join-Path $env:ProgramData 'chocolatey\bin'
+  if (-not ($env:Path -split ';' | Where-Object { $_ -eq $chocoBin })) { $env:Path += ";$chocoBin" }
 
-  choco install putty -y --no-progress
+  Start-Process -FilePath choco.exe -ArgumentList 'upgrade','-y','--no-progress','putty','googlechrome' -Wait -PassThru | Out-Null
 
-  function Test-ChromeInstalled {
-    return (Test-Path "C:\Program Files\Google\Chrome\Application\chrome.exe") -or
-          (Test-Path "C:\Program Files (x86)\Google\Chrome\Application\chrome.exe")
+  function Resolve-ExePath {
+    param([string]$Name,[string[]]$Candidates)
+    $cmd = $null
+    try { $cmd = Get-Command $Name -ErrorAction Stop } catch {}
+    if ($cmd) { return $cmd.Source }
+    foreach ($c in $Candidates) { if (Test-Path $c) { return $c } }
+    return $null
   }
 
-  if (-not (Test-ChromeInstalled)) {
-    $winget = Get-Command winget.exe -ErrorAction SilentlyContinue
-    if ($winget) {
-      & $winget install --id Google.Chrome `
-        --source winget `
-        --silent `
-        --accept-source-agreements `
-        --accept-package-agreements `
-        --disable-interactivity | Out-Null
-    } else {
-      choco install googlechrome -y --no-progress --ignore-checksums
-    }
+  $puttyPath = Resolve-ExePath -Name 'putty.exe' -Candidates @(
+    'C:\Program Files\PuTTY\putty.exe',
+    'C:\Program Files (x86)\PuTTY\putty.exe',
+    'C:\ProgramData\chocolatey\lib\putty.portable\tools\PUTTY.EXE',
+    'C:\ProgramData\chocolatey\bin\putty.exe'
+  )
 
-    $tries = 0
-    while (-not (Test-ChromeInstalled) -and $tries -lt 30) {
-      Start-Sleep -Seconds 10
-      $tries++
-    }
-  }
+  $puttygenPath = Resolve-ExePath -Name 'puttygen.exe' -Candidates @(
+    'C:\Program Files\PuTTY\puttygen.exe',
+    'C:\Program Files (x86)\PuTTY\puttygen.exe',
+    'C:\ProgramData\chocolatey\lib\putty.portable\tools\PUTTYGEN.EXE',
+    'C:\ProgramData\chocolatey\bin\puttygen.exe'
+  )
 
-  $puttyPath = $null
-  try { $puttyPath = (Get-Command putty.exe -ErrorAction Stop).Source } catch {
-    $candidates = @(
-      "C:\Program Files\PuTTY\putty.exe",
-      "C:\Program Files (x86)\PuTTY\putty.exe",
-      "C:\ProgramData\chocolatey\lib\putty.portable\tools\PUTTY.EXE"
-    )
-    foreach ($c in $candidates) { if (Test-Path $c) { $puttyPath = $c; break } }
-  }
+  $chromePath = Resolve-ExePath -Name 'chrome.exe' -Candidates @(
+    'C:\Program Files\Google\Chrome\Application\chrome.exe',
+    'C:\Program Files (x86)\Google\Chrome\Application\chrome.exe'
+  )
 
-  $chromePath = "C:\Program Files\Google\Chrome\Application\chrome.exe"
-  if (-not (Test-Path $chromePath)) {
-    $chromePath = "C:\Program Files (x86)\Google\Chrome\Application\chrome.exe"
-  }
-
-  $publicDesktop = Join-Path $Env:Public "Desktop"
+  $publicDesktop = Join-Path $Env:Public 'Desktop'
   New-Item -ItemType Directory -Force -Path $publicDesktop | Out-Null
   $wsh = New-Object -ComObject WScript.Shell
 
-  if ($puttyPath -and (Test-Path $puttyPath)) {
-    $lnk1 = Join-Path $publicDesktop "PuTTY.lnk"
-    $s1 = $wsh.CreateShortcut($lnk1)
-    $s1.TargetPath = $puttyPath
-    $s1.Save()
+  if ($puttyPath) {
+    $lnk1 = Join-Path $publicDesktop 'PuTTY.lnk'
+    $s1 = $wsh.CreateShortcut($lnk1); $s1.TargetPath = $puttyPath; $s1.Save()
+  }
+  if ($puttygenPath) {
+    $lnk2 = Join-Path $publicDesktop 'PuTTYgen.lnk'
+    $s2 = $wsh.CreateShortcut($lnk2); $s2.TargetPath = $puttygenPath; $s2.Save()
+  }
+  if ($chromePath) {
+    $lnk3 = Join-Path $publicDesktop 'Google Chrome.lnk'
+    $s3 = $wsh.CreateShortcut($lnk3); $s3.TargetPath = $chromePath; $s3.Save()
   }
 
-  if (Test-Path $chromePath) {
-    $lnk2 = Join-Path $publicDesktop "Google Chrome.lnk"
-    $s2 = $wsh.CreateShortcut($lnk2)
-    $s2.TargetPath = $chromePath
-    $s2.Save()
-  } else {
-    Write-Warning "Chrome no se pudo instalar (ni con winget ni con choco). Puedes instalarlo manualmente luego."
-  }
+  Write-Host "PuTTY, PuTTYgen y Chrome listos, con accesos directos en el escritorio público."
   POWERSHELL
   end
 end
